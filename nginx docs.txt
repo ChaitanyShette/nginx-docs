@@ -1,0 +1,415 @@
+*******install nginx *********
+sudo apt update 
+
+sudo apt upgrade
+
+sudo apt install nginx
+
+sudo systemctl start nginx
+
+sudo systemctl enable nginx
+
+sudo systemctl status nginx
+
+sudo nano /etc/nginx/sites-available/default
+[edit file]
+
+root /var/www/your_domain;
+
+server_name your_domain www.your_domain;
+
+nginx -t   [check syntax error in conf file]
+
+sudo ln -s /etc/nginx/sites-available/your_domain.conf /etc/nginx/sites-enable/your_domain.conf
+[for create new domain link file]
+
+*********default config************
+server {
+        listen 80;
+        listen [::]:80;
+
+        root /var/www/your_domain;
+
+        index index.html index.htm index.nginx-debian.html;
+
+        server_name <server-ip or your_domain>;
+
+        location / {
+                try_files $uri $uri/ =404;
+        }
+
+
+}
+
+*******for proxy pass in nginx ********
+
+server {
+        listen 80;
+        server_name <server-ip or your_domain>;
+        root /var/www/your_domain;
+        index index.html;
+
+location /api {
+                 proxy_pass http://<server-private-ip>:8000/api;
+                  proxy_buffering off;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-Host $host;
+                  proxy_set_header X-Forwarded-Port $server_port;
+              }
+
+         location /api/admin {
+                  proxy_pass http://<server-private-ip>:8000/api/admin;
+                  proxy_buffering off;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-Host $host;
+                  proxy_set_header X-Forwarded-Port $server_port;
+                }
+
+         location /api/o {
+                   proxy_pass http://<server-private-ip>:8000/api/o;
+                  proxy_buffering off;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-Host $host;
+                  proxy_set_header X-Forwarded-Port $server_port;
+                }
+		 location /api/licensewrite_key {
+                   proxy_pass http://<server-private-ip>:8000/api/licensewrite_key;
+                  proxy_buffering off;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-Host $host;
+                  proxy_set_header X-Forwarded-Port $server_port;
+        }
+
+         location /api/licensekey {
+                   proxy_pass http://<server-private-ip>:8000/api/licensekey;
+                  proxy_buffering off;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-Host $host;
+                  proxy_set_header X-Forwarded-Port $server_port;
+        }		
+}
+******redirect http to https code********
+server {
+    if ($host = <domain-name>){
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+
+        server_name <domain-name>;
+
+    listen [::]:80;
+    listen 80;
+    return 404; # managed by Certbot
+
+
+}
+*********open ssl for domain name********
+
+nslookup domain.name [for check domain pointed to ip address]
+
+sudo certbot –nginx [show all domains]
+
+sudo certbot certonly --nginx [use for manual configuration in config file]
+
+sudo certbot renew --dry-run [use for dry run]
+  
+sudo certbot certificates [check certficates]
+
+sudo certbot delete --cert-name example.com [delete certficates]
+
+
+
+*********nginx upstrem for load balancing in single domain*******
+
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log notice;
+pid /run/nginx.pid;
+
+# Load dynamic modules. See /usr/share/doc/nginx/README.dynamic.
+include /usr/share/nginx/modules/*.conf;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log  /var/log/nginx/access.log  main;
+
+    sendfile            on;
+    tcp_nopush          on;
+    keepalive_timeout   65;
+    types_hash_max_size 4096;
+
+    include             /etc/nginx/mime.types;
+    default_type        application/octet-stream;
+
+upstream backend {
+    server <server1-private-ip>:8000 weight=2;
+    server <server2-private-ip>:8000 weight=1;
+
+
+upstream web {
+    server <server1-private-ip>:80 weight=2;
+    server <server2-private-ip>:80 weight=1;
+
+    #check interval=3000 rise=2 fall=3 timeout=1000;
+}
+    include /etc/nginx/conf.d/*.conf;
+
+    server {
+        listen       443 ssl;
+        listen       [::]:443 ssl;
+        server_name  <domain-name>;
+        root         /var/www/your_domain;
+
+        # Load configuration files for the default server block.
+        include /etc/nginx/default.d/*.conf;
+
+        ssl_certificate /path/to/your/fullchain.pem;
+        ssl_certificate_key /path/to/your/privkey.pem;
+
+        error_page 404 /404.html;
+        location = /404.html {
+        }
+
+        error_page 500 502 503 504 /50x.html;
+        location = /50x.html {
+        }
+
+
+        location /api {
+
+                 proxy_pass http://backend/api;
+
+                  proxy_buffering off;
+
+                  proxy_set_header X-Upstream-Server "Server 1";
+
+                  proxy_set_header X-Real-IP $remote_addr;
+
+                  proxy_set_header X-Forwarded-Port $server_port;
+
+                  client_max_body_size 5000m;
+
+                  proxy_read_timeout 3600s;
+
+                  #error_log /web/nginx/logs/backend/eeconAPIerror.log;
+
+                  #access_log  /web/nginx/logs/backend/reconApiAccess.log  apm;
+
+        }
+
+        location /api/admin {
+
+                   proxy_pass  http://backend/api/admin;
+
+                  proxy_buffering off;
+
+                  proxy_set_header X-Upstream-Server "Server 1";
+
+                  proxy_set_header X-Real-IP $remote_addr;
+
+                  proxy_set_header X-Forwarded-Host $host;
+
+                  proxy_set_header X-Forwarded-Port $server_port;
+
+                  #access_log  /web/nginx/logs/backend/reconAdminAccess.log  apm;
+
+        }
+
+         location /api/o {
+
+                   proxy_pass  http://backend/api/o;
+
+                  proxy_buffering off;
+
+                  proxy_set_header X-Upstream-Server "Server 1";
+
+                  proxy_set_header X-Real-IP $remote_addr;
+
+                  proxy_set_header X-Forwarded-Host $host;
+
+                  proxy_set_header X-Forwarded-Port $server_port;
+
+                  #access_log  /web/nginx/logs/backend/ApiOAccess.log  apm;
+
+        }
+
+          location /api/licensewrite_key {
+
+                   proxy_pass  http://backend/api/licensewrite_key;
+
+                  proxy_buffering off;
+
+                  proxy_set_header X-Real-IP $remote_addr;
+
+                  proxy_set_header X-Forwarded-Host $host;
+
+                  proxy_set_header X-Forwarded-Port $server_port;
+
+                  #access_log  /web/nginx/logs/backend/licensewrite_keyAccess.log  apm;
+
+        }
+
+
+           location /api/licensekey {
+
+                   proxy_pass  http://backend/api/licensekey;
+
+                  proxy_buffering off;
+
+                  proxy_set_header X-Real-IP $remote_addr;
+
+                  proxy_set_header X-Forwarded-Host $host;
+
+                  proxy_set_header X-Forwarded-Port $server_port;
+
+                  #access_log  /web/nginx/logs/backend/licensekeyAccess.log  apm;
+
+        }
+
+
+    }
+}
+
+******************nginx version upgrade ****************
+sudo cp -r /etc/nginx /etc/nginx-backup
+
+wget http://nginx.org/keys/nginx_signing.key
+sudo apt-key add nginx_signing.key
+
+echo "deb http://nginx.org/packages/mainline/ubuntu `lsb_release -cs` nginx" | sudo tee /etc/apt/sources.list.d/nginx.list
+
+sudo apt-get update
+sudo apt-get install nginx
+nginx -v
+
+sudo systemctl start nginx
+sudo nginx -t 
+sudo systemctl status nginx
+
+
+mkdir /etc/nginx/sites-available/
+mkdir /etc/nginx/sites-enable/
+
+edit and add 
+/etc/nginx/nginx.conf
+    include /etc/nginx/sites-enabled/*;
+	
+nano /etc/nginx/proxy_params
+
+proxy_set_header Host $http_host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+
+
+*******************nginx uninstall***********************
+
+sudo systemctl stop nginx
+sudo apt remove --purge nginx nginx-common nginx-core
+sudo apt autoremove
+nginx -v
+
+	
+******************************************************
+upstream backend {
+
+    server server1-private-ip:8000 weight=1;
+    server server2-private-ip:8000 weight=2;
+
+}
+
+server {
+        listen 443 ssl;
+        listen [::]:443 ssl;
+
+        ssl_certificate /path/to/your/fullchain.pem;
+        ssl_certificate_key /path/to/your/privkey.pem;
+
+        # root /web/recon/your_domain/html;
+
+        index index.html index.htm index.nginx-debian.html;
+
+        server_name your_domain;
+
+        proxy_hide_header X-Frame-Options;
+         # Add X-Frame-Options header
+        add_header X-Frame-Options "SAMEORIGIN";
+
+        # Add Content-Security-Policy header
+        add_header Content-Security-Policy "frame-ancestors 'self';";
+
+
+        #location / {
+        #        try_files $uri $uri/ =404;
+        #}
+
+
+        location / {
+                  proxy_pass http://server-private-ip:82;   #mentioned docker container expose port
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+
+
+        location /api {
+                  proxy_pass http://backend/api;
+                  proxy_buffering off;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-Host $host;
+                  proxy_set_header X-Forwarded-Port $server_port;
+                  client_max_body_size 5000m;
+                  proxy_read_timeout 7200s;
+        }
+
+        location /api/admin {
+                  proxy_pass  http://backend/api/admin;
+                  proxy_buffering off;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-Host $host;
+                  proxy_set_header X-Forwarded-Port $server_port;
+        }
+
+         location /api/o {
+                  proxy_pass  http://backend/api/o;
+                  proxy_buffering off;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-Host $host;
+                  proxy_set_header X-Forwarded-Port $server_port;
+        }
+
+          location /api/licensewrite_key {
+                  proxy_pass  http://backend/api/licensewrite_key;
+                  proxy_buffering off;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-Host $host;
+                  proxy_set_header X-Forwarded-Port $server_port;
+        }
+
+
+           location /api/licensekey {
+                  proxy_pass  http://backend/api/licensekey;
+                  proxy_buffering off;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-Host $host;
+                  proxy_set_header X-Forwarded-Port $server_port;
+        }
+
+           location /api/sendemailapi {
+                  proxy_pass  http://backend/api/sendemailapi;
+                  proxy_buffering off;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-Host $host;
+                  proxy_set_header X-Forwarded-Port $server_port;
+        }
+}
